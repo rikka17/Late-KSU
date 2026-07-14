@@ -286,20 +286,23 @@ jobs:
           cp -f "$X86_64_KSUD" target/x86_64-linux-android/release/ksud
 
       - name: Prepare signing inputs
-        if: ${{ github.event_name == 'pull_request' || (github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/ci' || github.ref == 'refs/heads/sync-upstream')) || github.ref_type == 'tag' }}
-        env:
-          PR_KEYSTORE: ${{ needs.generate-key.outputs.keystore }}
-          PR_KEYSTORE_PASSWORD: ${{ needs.generate-key.outputs.keystore_password }}
-          PR_KEY_PASSWORD: ${{ needs.generate-key.outputs.key_password }}
-          PROD_KEYSTORE: ${{ secrets.KEYSTORE }}
-          PROD_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          PROD_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          PROD_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "$PR_KEYSTORE" | base64 -d > pr-key.jks
-            echo "SIGN_KEYSTORE_FILE=pr-key.jks" >> $GITHUB_ENV
-            echo "SIGN_KEY_ALIAS=pr-key" >> $GITHUB_ENV
+          # 如果没有配置 Secrets，自动生成一个调试密钥
+          if [ -z "$PROD_KEYSTORE" ] && [ -z "$PR_KEYSTORE" ]; then
+            keytool -genkey -v -keystore key.jks -keyalg RSA -keysize 2048 -validity 10000 -alias mykey \
+              -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US"
+            echo "SIGN_KEYSTORE_FILE=key.jks" >> $GITHUB_ENV
+            echo "SIGN_KEY_ALIAS=mykey" >> $GITHUB_ENV
+            echo "SIGN_KEYSTORE_PASSWORD=android" >> $GITHUB_ENV
+            echo "SIGN_KEY_PASSWORD=android" >> $GITHUB_ENV
+            exit 0
+          fi
+
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            test -n "$PR_KEYSTORE"
+            echo "$PR_KEYSTORE" | base64 -d > key.jks
+            echo "SIGN_KEYSTORE_FILE=key.jks" >> $GITHUB_ENV
+            echo "SIGN_KEY_ALIAS=$PR_KEY_ALIAS" >> $GITHUB_ENV
             echo "SIGN_KEYSTORE_PASSWORD=$PR_KEYSTORE_PASSWORD" >> $GITHUB_ENV
             echo "SIGN_KEY_PASSWORD=$PR_KEY_PASSWORD" >> $GITHUB_ENV
           else
@@ -310,6 +313,17 @@ jobs:
             echo "SIGN_KEYSTORE_PASSWORD=$PROD_KEYSTORE_PASSWORD" >> $GITHUB_ENV
             echo "SIGN_KEY_PASSWORD=$PROD_KEY_PASSWORD" >> $GITHUB_ENV
           fi
+        env:
+          PR_KEYSTORE: ${{ secrets.PR_KEYSTORE }}
+          PR_KEYSTORE_PASSWORD: ${{ secrets.PR_KEYSTORE_PASSWORD }}
+          PR_KEY_PASSWORD: ${{ secrets.PR_KEY_PASSWORD }}
+          PR_KEY_ALIAS: ${{ secrets.PR_KEY_ALIAS }}
+          PROD_KEYSTORE: ${{ secrets.PROD_KEYSTORE }}
+          PROD_KEY_ALIAS: ${{ secrets.PROD_KEY_ALIAS }}
+          PROD_KEYSTORE_PASSWORD: ${{ secrets.PROD_KEYSTORE_PASSWORD }}
+          PROD_KEY_PASSWORD: ${{ secrets.PROD_KEY_PASSWORD }}
+        shell: /usr/bin/bash -e {0}
+
 
       - name: Repack and resign
         if: ${{ github.event_name == 'pull_request' || (github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/ci' || github.ref == 'refs/heads/sync-upstream')) || github.ref_type == 'tag' }}
